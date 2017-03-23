@@ -15,7 +15,7 @@ class WifiSwitcher {
 
   public:
     // Attributs
-    e_wifiState state;
+    e_wifiState state = STATION;
   
     // Constructor
     WifiSwitcher();

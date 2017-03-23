@@ -2,15 +2,8 @@
 
 // Constructor
 WifiSwitcher::WifiSwitcher(){
-  this->server = new ESP8266WebServer(80);
-
-  if (!MDNS.begin("esp12emeric")){
-    this->state = DOWN;
-  }
-  
-  this->initHTTPRoutes();
-
   this->state = STATION;
+  this->server = new ESP8266WebServer(80);
 }
 
 WifiSwitcher::WifiSwitcher (const WifiSwitcher& src){
@@ -19,6 +12,8 @@ WifiSwitcher::WifiSwitcher (const WifiSwitcher& src){
 
 // Destructor
 WifiSwitcher::~WifiSwitcher(){
+  WiFi.disconnect();
+  this->server->stop();
   delete this->server;  
 }
 
@@ -29,8 +24,26 @@ boolean WifiSwitcher::launchHotSpot(char* ssid, char* password){
   Serial.println();
 
   Serial.print("Setting soft-AP ... ");
+
+
+  WiFi.mode(WIFI_AP);// Need by MDNS WIFI_AP
   
-  return WiFi.softAP(ssid, password);
+  this->initHTTPRoutes();
+
+  this->ssid = String(ssid);
+  this->password = String(password);
+
+  IPAddress Ip(192, 168, 1, 1);
+  IPAddress NMask(255, 255, 255, 0);
+  WiFi.softAPConfig(Ip, Ip, NMask);
+
+  boolean rtn = WiFi.softAP(ssid, password);
+  if (!MDNS.begin("esp12emeric", WiFi.softAPIP())){
+    this->state = DOWN;
+  } else {
+    this->state = STATION;
+  }
+  return rtn;
 }
 
 int WifiSwitcher::howManyDevices(){
@@ -79,10 +92,10 @@ void WifiSwitcher::postHTTPInternetWifi(){
   this->server->sendHeader("Set-Cookie","ESPSESSIONID=1");
   
   if (this->server->hasArg("SSID") && this->server->hasArg("PASSWORD")){
-    this->ssid = this->server->arg("SSID");
-    this->password = this->server->arg("PASSWORD");
     if (ssid && password){
-      WiFi.begin(this->ssid.c_str(), this->password.c_str()); 
+      WiFi.disconnect();
+      WiFi.mode(WIFI_AP_STA);
+      WiFi.begin(this->server->arg("SSID").c_str(), this->server->arg("PASSWORD").c_str()); 
       boolean hasError = false;
       while (WiFi.status() != WL_CONNECTED) { 
           switch(WiFi.status()) {
@@ -98,27 +111,25 @@ void WifiSwitcher::postHTTPInternetWifi(){
                 this->errorMessage = "IDLE STATUS";
                 hasError = true;
                 break;
-            case WL_DISCONNECTED:
-                this->errorMessage = "DISCONNECTED";
-                hasError = true;
-                break;
           }
 
           if (hasError){
             break;
           }
+          
           digitalWrite(LED_BUILTIN, LOW);
           delay(1000);
           digitalWrite(LED_BUILTIN, HIGH);
           delay(1000);
       }
       
-      if (WiFi.status() != WL_CONNECTED){ 
+      if (WiFi.status() != WL_CONNECTED){
+        WiFi.softAP(ssid.c_str(), password.c_str());
         this->server->sendHeader("Location","/");
         digitalWrite(LED_BUILTIN, LOW);
       } else {
+        this->state = LINKED;
         this->server->sendHeader("Location","/ping");
-        digitalWrite(LED_BUILTIN, HIGH);
       }
       
       
